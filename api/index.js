@@ -6,9 +6,6 @@ const questions = require('./questions');
 const app = express();
 app.use(express.json());
 
-// Serve static files from public folder
-app.use(express.static(path.join(__dirname, '../public')));
-
 app.get('/api/questions', (req, res) => {
   const safe = questions.map(q => {
     const { answer, workings, ...rest } = q;
