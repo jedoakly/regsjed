@@ -690,6 +690,10 @@ function shuffle(arr) {
 }
 
 function startMode(mode) {
+  if (allQuestions.length === 0) {
+    alert('Questions still loading, please try again.');
+    return;
+  }
   currentMode = mode;
   sessionCorrect = 0;
   sessionTotal = 0;
