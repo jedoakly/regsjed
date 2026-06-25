@@ -37,7 +37,7 @@ app.post('/api/check', (req, res) => {
   res.json({ correct, correctAnswer: q.answer, workings: q.workings || null, hint: q.hint || null });
 });
 
-app.get('*', (req, res) => {
+app.get(/^(?!\/api).*$/, (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
