@@ -1,12 +1,12 @@
 const express = require('express');
-const cookieParser = require('cookie-parser');
 const path = require('path');
+const fs = require('fs');
 const questions = require('./questions');
 
 const app = express();
-
 app.use(express.json());
-app.use(cookieParser());
+
+// Serve static files from public folder
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/api/questions', (req, res) => {
@@ -37,8 +37,10 @@ app.post('/api/check', (req, res) => {
   res.json({ correct, correctAnswer: q.answer, workings: q.workings || null, hint: q.hint || null });
 });
 
-app.get(/^(?!\/api).*$/, (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+app.get('*', (req, res) => {
+  const htmlPath = path.join(__dirname, '../public/index.html');
+  res.setHeader('Content-Type', 'text/html');
+  res.send(fs.readFileSync(htmlPath, 'utf8'));
 });
 
 const PORT = process.env.PORT || 3000;
