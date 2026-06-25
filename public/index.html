@@ -1,34 +1,279 @@
-const questions = require('./questions');
-
-module.exports = async (req, res) => {
-  const url = req.url || '/';
-
-  if (url === '/api/questions' && req.method === 'GET') {
-    const safe = questions.map(q => {
-      const { answer, workings, ...rest } = q;
-      return rest;
-    });
-    return res.json(safe);
-  }
-
-  if (url === '/api/check' && req.method === 'POST') {
-    const { questionId, answer } = req.body;
-    const q = questions.find(q => q.id === questionId);
-    if (!q) return res.status(404).json({ error: 'Not found' });
-
-    let correct = false;
-    if (q.type === 'mcq') {
-      correct = parseInt(answer) === q.answer;
-    } else if (q.type === 'multi') {
-      const submitted = (Array.isArray(answer) ? answer : [answer]).map(Number).sort();
-      const expected = [...q.answer].sort();
-      correct = JSON.stringify(submitted) === JSON.stringify(expected);
-    } else {
-      const norm = s => String(s).toLowerCase().replace(/\s+/g, ' ').trim();
-      correct = norm(answer) === norm(q.answer);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EWRB Regulations Exam</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f9f9f7; --surface: #ffffff; --border: #e8e8e4; --text: #1a1a1a;
+      --muted: #767676; --accent: #1a1a1a; --accent-light: #f0f0ec;
+      --green: #1a7a4a; --green-bg: #edf7f1; --red: #c0392b; --red-bg: #fdf0ee;
     }
-    return res.json({ correct, correctAnswer: q.answer, workings: q.workings || null, hint: q.hint || null });
-  }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.5; }
+    nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; height: 60px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .nav-brand { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text); cursor: pointer; }
+    .nav-right { display: flex; align-items: center; gap: 1.5rem; }
+    .nav-timer { font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; display: none; color: var(--text); }
+    .nav-timer.warning { color: var(--red); }
+    .nav-back { font-size: 0.85rem; color: var(--muted); cursor: pointer; display: none; background: none; border: none; padding: 6px 0; }
+    .nav-back:hover { color: var(--text); }
+    .page { display: none; }
+    .page.active { display: block; }
+    .home-wrap { max-width: 680px; margin: 0 auto; padding: 5rem 2rem 4rem; }
+    .home-eyebrow { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 1rem; }
+    .home-title { font-size: 2.6rem; font-weight: 800; line-height: 1.15; letter-spacing: -0.03em; margin-bottom: 1rem; }
+    .home-sub { font-size: 1.05rem; color: var(--muted); margin-bottom: 3.5rem; max-width: 480px; }
+    .modes-grid { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 3rem; }
+    .mode-card { background: var(--surface); padding: 1.5rem 1.75rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: background 0.1s; gap: 1rem; }
+    .mode-card:hover { background: var(--accent-light); }
+    .mode-left { display: flex; align-items: center; gap: 1.25rem; }
+    .mode-icon { width: 40px; height: 40px; border-radius: 8px; background: var(--accent-light); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+    .mode-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.15rem; }
+    .mode-desc { font-size: 0.82rem; color: var(--muted); }
+    .mode-arrow { color: var(--muted); font-size: 1rem; flex-shrink: 0; }
+    .standards-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .std-pill { padding: 4px 10px; background: var(--accent-light); border-radius: 20px; font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+    .quiz-wrap { max-width: 700px; margin: 0 auto; padding: 2.5rem 2rem 4rem; }
+    .quiz-progress-bar { height: 3px; background: var(--border); border-radius: 3px; margin-bottom: 2.5rem; overflow: hidden; }
+    .quiz-progress-fill { height: 100%; background: var(--text); transition: width 0.3s ease; }
+    .quiz-meta-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; flex-wrap: wrap; gap: 0.5rem; }
+    .quiz-counter { font-size: 0.82rem; color: var(--muted); font-weight: 500; }
+    .quiz-badges { display: flex; gap: 0.4rem; }
+    .badge { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; }
+    .badge-esr { background: #eef3fb; color: #1a4a8a; }
+    .badge-as3000 { background: #edf7f1; color: #1a7a4a; }
+    .badge-as3008 { background: #fdf0ee; color: #c0392b; }
+    .badge-ecp { background: #fef9ec; color: #8a5a1a; }
+    .badge-type { background: var(--accent-light); color: var(--muted); }
+    .question-ref { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.75rem; }
+    .question-text { font-size: 1.1rem; font-weight: 500; line-height: 1.65; margin-bottom: 2rem; white-space: pre-wrap; }
+    .options { display: flex; flex-direction: column; gap: 0.6rem; }
+    .option { display: flex; align-items: flex-start; gap: 1rem; padding: 1rem 1.25rem; border: 1.5px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); text-align: left; color: var(--text); font-size: 0.95rem; line-height: 1.45; transition: border-color 0.1s, background 0.1s; width: 100%; }
+    .option:hover:not(:disabled) { border-color: var(--text); background: var(--accent-light); }
+    .opt-letter { min-width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 1px; transition: all 0.1s; }
+    .option.selected { border-color: var(--text); background: var(--accent-light); }
+    .option.selected .opt-letter { border-color: var(--text); background: var(--text); color: #fff; }
+    .option.correct { border-color: var(--green); background: var(--green-bg); }
+    .option.correct .opt-letter { border-color: var(--green); background: var(--green); color: #fff; }
+    .option.wrong { border-color: var(--red); background: var(--red-bg); }
+    .option.wrong .opt-letter { border-color: var(--red); background: var(--red); color: #fff; }
+    .option:disabled { cursor: default; }
+    .checkbox { min-width: 20px; height: 20px; border: 1.5px solid var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0; margin-top: 2px; transition: all 0.1s; }
+    .multi-option { display: flex; align-items: flex-start; gap: 1rem; padding: 1rem 1.25rem; border: 1.5px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); text-align: left; color: var(--text); font-size: 0.95rem; line-height: 1.45; transition: border-color 0.1s, background 0.1s; width: 100%; }
+    .multi-option:hover:not(:disabled) { border-color: var(--text); background: var(--accent-light); }
+    .multi-option.selected { border-color: var(--text); background: var(--accent-light); }
+    .multi-option.selected .checkbox { border-color: var(--text); background: var(--text); color: #fff; }
+    .multi-option.correct { border-color: var(--green); background: var(--green-bg); }
+    .multi-option.correct .checkbox { border-color: var(--green); background: var(--green); color: #fff; }
+    .multi-option.wrong { border-color: var(--red); background: var(--red-bg); }
+    .multi-option.wrong .checkbox { border-color: var(--red); background: var(--red); color: #fff; }
+    .multi-option:disabled { cursor: default; }
+    .fill-area { display: flex; flex-direction: column; gap: 0.75rem; }
+    .hint-text { font-size: 0.82rem; color: var(--muted); padding: 0.6rem 0.875rem; background: var(--accent-light); border-radius: 6px; }
+    .fill-area textarea { width: 100%; padding: 1rem; background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; font-family: inherit; resize: vertical; min-height: 90px; transition: border-color 0.15s; }
+    .fill-area textarea:focus { outline: none; border-color: var(--text); }
+    .feedback-box { margin-top: 1.25rem; padding: 1.25rem; border-radius: 8px; display: none; }
+    .feedback-box.show { display: block; }
+    .feedback-box.correct { background: var(--green-bg); border: 1px solid #b2dcc7; }
+    .feedback-box.wrong { background: var(--red-bg); border: 1px solid #f0c4be; }
+    .feedback-title { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .feedback-box.correct .feedback-title { color: var(--green); }
+    .feedback-box.wrong .feedback-title { color: var(--red); }
+    .feedback-answer { font-size: 0.9rem; line-height: 1.55; color: var(--text); }
+    .feedback-workings { margin-top: 0.875rem; padding: 0.875rem; background: rgba(0,0,0,0.04); border-radius: 6px; font-size: 0.84rem; font-family: 'Courier New', monospace; white-space: pre-wrap; color: var(--text); }
+    .quiz-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 2rem; flex-wrap: wrap; gap: 0.75rem; }
+    .btn { padding: 10px 22px; border-radius: 7px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; font-family: inherit; transition: all 0.1s; }
+    .btn-primary { background: var(--text); color: #fff; }
+    .btn-primary:hover { background: #333; }
+    .btn-ghost { background: none; color: var(--muted); border: 1.5px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--text); color: var(--text); }
+    .summary-wrap { max-width: 520px; margin: 4rem auto; padding: 0 2rem; text-align: center; }
+    .summary-score-ring { width: 140px; height: 140px; border-radius: 50%; border: 6px solid var(--border); display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; flex-direction: column; }
+    .summary-score-ring.pass { border-color: var(--green); }
+    .summary-score-ring.fail { border-color: var(--red); }
+    .summary-pct { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+    .summary-pct-label { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
+    .summary-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .summary-sub { color: var(--muted); margin-bottom: 2rem; }
+    .summary-breakdown { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; text-align: left; }
+    .summary-breakdown-title { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 1rem; }
+    .breakdown-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    .breakdown-row:last-child { border-bottom: none; }
+    .breakdown-pct { font-weight: 700; }
+    .summary-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .empty-state { text-align: center; padding: 4rem 2rem; color: var(--muted); }
+    .empty-state h3 { font-size: 1.1rem; color: var(--text); margin-bottom: 0.5rem; }
+    .empty-state p { font-size: 0.9rem; margin-bottom: 1.5rem; }
+    @media (max-width: 600px) {
+      .home-title { font-size: 1.9rem; }
+      nav { padding: 0 1.25rem; }
+      .home-wrap { padding: 3rem 1.25rem 3rem; }
+      .quiz-wrap { padding: 1.5rem 1.25rem 3rem; }
+    }
+  </style>
+</head>
+<body>
 
-  res.status(404).json({ error: 'Not found' });
-};
+<nav>
+  <span class="nav-brand" onclick="goHome()">EWRB Regulations</span>
+  <div class="nav-right">
+    <span class="nav-timer" id="nav-timer">3:00:00</span>
+    <button class="nav-back" id="nav-back" onclick="goHome()">← Home</button>
+  </div>
+</nav>
+
+<div id="page-home" class="page active">
+  <div class="home-wrap">
+    <div class="home-eyebrow">New Zealand Electrical</div>
+    <h1 class="home-title">Regulations<br>Exam Practice</h1>
+    <p class="home-sub">Structured practice across ESR 2010, AS/NZS 3000, AS/NZS 3008, and ECP34.</p>
+    <div class="modes-grid">
+      <div class="mode-card" onclick="startMode('full')">
+        <div class="mode-left">
+          <div class="mode-icon">📋</div>
+          <div class="mode-info">
+            <div class="mode-name">Full Exam</div>
+            <div class="mode-desc">All 72 questions — shuffled — 3 hour timer</div>
+          </div>
+        </div>
+        <span class="mode-arrow">→</span>
+      </div>
+      <div class="mode-card" onclick="startMode('quickfire')">
+        <div class="mode-left">
+          <div class="mode-icon">⚡</div>
+          <div class="mode-info">
+            <div class="mode-name">Quick Fire</div>
+            <div class="mode-desc">20 random questions — no timer</div>
+          </div>
+        </div>
+        <span class="mode-arrow">→</span>
+      </div>
+      <div class="mode-card" onclick="startMode('weakspots')">
+        <div class="mode-left">
+          <div class="mode-icon">🎯</div>
+          <div class="mode-info">
+            <div class="mode-name">Weak Spots</div>
+            <div class="mode-desc">Questions you've answered incorrectly</div>
+          </div>
+        </div>
+        <span class="mode-arrow">→</span>
+      </div>
+      <div class="mode-card" onclick="startMode('maxdemand')">
+        <div class="mode-left">
+          <div class="mode-icon">📊</div>
+          <div class="mode-info">
+            <div class="mode-name">Maximum Demand</div>
+            <div class="mode-desc">Appendix C calculation practice</div>
+          </div>
+        </div>
+        <span class="mode-arrow">→</span>
+      </div>
+      <div class="mode-card" onclick="startMode('voltdrop')">
+        <div class="mode-left">
+          <div class="mode-icon">📉</div>
+          <div class="mode-info">
+            <div class="mode-name">Volt Drop</div>
+            <div class="mode-desc">Cable sizing and volt drop calculations</div>
+          </div>
+        </div>
+        <span class="mode-arrow">→</span>
+      </div>
+    </div>
+    <div class="standards-row">
+      <span class="std-pill">ESR 2010</span>
+      <span class="std-pill">AS/NZS 3000</span>
+      <span class="std-pill">AS/NZS 3008</span>
+      <span class="std-pill">ECP34</span>
+    </div>
+  </div>
+</div>
+
+<div id="page-quiz" class="page">
+  <div class="quiz-wrap">
+    <div class="quiz-progress-bar"><div class="quiz-progress-fill" id="progress-fill"></div></div>
+    <div class="quiz-meta-row">
+      <span class="quiz-counter" id="q-counter"></span>
+      <div class="quiz-badges">
+        <span class="badge" id="q-standard-badge"></span>
+        <span class="badge badge-type" id="q-type-badge"></span>
+      </div>
+    </div>
+    <div class="question-ref" id="q-ref"></div>
+    <div class="question-text" id="q-text"></div>
+    <div id="q-body"></div>
+    <div class="feedback-box" id="feedback-box">
+      <div class="feedback-title" id="feedback-title"></div>
+      <div class="feedback-answer" id="feedback-answer"></div>
+      <div class="feedback-workings" id="feedback-workings" style="display:none"></div>
+    </div>
+    <div class="quiz-actions" id="quiz-actions">
+      <button class="btn btn-ghost" id="skip-btn" onclick="nextQuestion()">Skip →</button>
+      <div style="display:flex;gap:0.6rem">
+        <button class="btn btn-ghost" id="check-btn" onclick="submitAnswer()">Check Answer</button>
+        <button class="btn btn-primary" id="next-btn" style="display:none" onclick="nextQuestion()">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="page-summary" class="page">
+  <div class="summary-wrap">
+    <div class="summary-score-ring" id="summary-ring">
+      <div class="summary-pct" id="summary-pct"></div>
+      <div class="summary-pct-label">score</div>
+    </div>
+    <h2 class="summary-title" id="summary-title"></h2>
+    <p class="summary-sub" id="summary-sub"></p>
+    <div class="summary-breakdown" id="summary-breakdown"></div>
+    <div class="summary-actions" id="summary-actions"></div>
+  </div>
+</div>
+
+<script>
+const QUESTIONS = [
+  { id:1, type:'mcq', standard:'ESR', ref:'Front page', question:'The Electricity Act of 1992 is administered by:', options:['EWRB','WorkSafe','MBIE — Ministry of Business, Innovation and Employment','Standards New Zealand'], answer:2 },
+  { id:2, type:'mcq', standard:'ESR', ref:'Section 16 (4)(b)', question:'Every accident that is caused wholly or partly by, or involves or affects electricity, and results in serious harm to any person, or damage to any place, WorkSafe shall be notified by the APPROPRIATE PERSON. With reference to the Electricity Act 1992, who is the appropriate person?', options:['If the accident is discovered by any person who is authorised to do prescribed electrical work under part 10, that person.','The person investigating the accident pursuant to the Health and Safety at Works Act 2015.','The responding emergency service.','The Secretary'], answer:0 },
+  { id:3, type:'mcq', standard:'ESR', ref:'Section 104', question:'With reference to the Electricity Act 1992, what is the maximum length a practising licence can be issued for?', options:['2 Years','1 Year','6 months','5 Years'], answer:3 },
+  { id:4, type:'fill', standard:'ESR', ref:'Section 16', question:'With reference to the Electricity Act 1992, complete the following sentence. Accidents that result in ________ or ________ that renders that place or that part of that place unusable for any purpose shall be notified to WorkSafe.', answer:'serious harm to any person / damage to any place or part of a place', hint:'Two consequences that trigger notification' },
+  { id:5, type:'fill', standard:'ESR', ref:'Section 2', question:"With reference to the Electricity Act 1992, complete the following sentence. 'Supervision', in relation to any work, means that the work is undertaken under such control and direction of a ________ to do the work.", answer:'person authorised under this Act', hint:'What type of person must supervise the work?' },
+  { id:6, type:'fill', standard:'ESR', ref:'Section highlighted', question:'With reference to the Electricity Act 1992, complete the following sentence. This section does not prevent the connection to any power supply if that connection or supply is solely for the purposes of carrying out ________, ________ or ________ required by any regulations.', answer:'Testing / certification / inspection', hint:'Three permitted purposes for connection' },
+  { id:7, type:'calc', topic:'volt_drop', standard:'AS3008', ref:'Table C7', question:'Use the SIMPLIFIED volt drop method in AS/NZS 3000 to calculate the maximum length (to 1 decimal place) a submain cable can run to a shed.\n\nCable: 6mm² 2C+E TPS\nMaximum demand: 23A\nAllowed voltage drop: 2.0%', answer:'26.6m', workings:'From Table C7, VD factor for 6mm² single phase = 306 mV/A·m at 1%\nMax length = (factor × %VD) / current\n= (306 × 2.0) / 23 = 612 / 23 = 26.6m', hint:'Use Table C7 VD factor for 6mm² single phase = 306. Formula: (factor × %VD) / Amps' },
+  { id:8, type:'calc', topic:'volt_drop', standard:'AS3008', ref:'Table C7', question:'Use the SIMPLIFIED volt drop method in AS/NZS 3000 to calculate which cable will be suitable for a 3-phase main.\n\nLoad: 80kW balanced\nDistance: 35m\nMax voltage drop: 2.5%', answer:'16mm²', workings:'Step 1: Current = 80,000 / (1.732 × 400) = 115.47A\nStep 2: Cable factor = (I × L) / %VD = (115.47 × 35) / 2.5 = 1616.6\nFrom Table C7, next size up ≥ 1617 → 16mm²', hint:'I = P / (√3 × V), then cable factor = (I × L) / %VD, match to Table C7' },
+  { id:9, type:'mcq', standard:'ESR', ref:'Regulation 2', question:'According to the Electricity (Safety) Regulations 2010, is a neutral conductor considered to be a live conductor?', options:['No','Yes','If bonded','MEN'], answer:1 },
+  { id:10, type:'mcq', standard:'ESR', ref:'Regulation 2', question:'According to the Electricity (Safety) Regulations 2010, define high voltage.', options:['Over 1000V ac or 1500V dc','Over 1000V ac to 11kV ac','Greater than 55V ac and 120V dc','Greater than 11kV'], answer:0 },
+  { id:11, type:'fill', standard:'ESR', ref:'ER 63 (4)(5)', question:'Electrical Installations must be designed, constructed and operated so that the voltage drop is not more than ________ between the point of supply and any socket outlet within an electrical installation operating at standard low voltage.', answer:'5% under maximum load conditions', hint:'Percentage and condition' },
+  { id:12, type:'fill', standard:'ESR', ref:'ESR', question:'Refer to the Electricity (Safety) Regulations 2010 and state the minimum and maximum voltage for a domestic property feed at standard low voltage at the point of supply.', answer:'Minimum 216.2V / Maximum 243.8V', hint:'State both min and max values in volts' },
+  { id:13, type:'mcq', standard:'AS3000', ref:'C.5.11.5 Note 2', question:'Refer to AS/NZS 3000 — which standard provides guidance on the effects of electrical interference to circuits?', options:['AS/NZS 3760','AS/NZS 3080','AS/NZS 3098','AS/NZS 3800'], answer:1 },
+  { id:14, type:'mcq', standard:'AS3000', ref:'1.4.83', question:'According to AS/NZS 3000 what does the term SELV mean?', options:['Separated Extra Low Voltage','Special Extra Low Voltage','Single Extra Low Voltage','Specified Extra Low Voltage'], answer:0 },
+  { id:15, type:'mcq', standard:'AS3000', ref:'Table 2.6', question:'AS/NZS 3000 details DISCONNECTION TIMES for a 230/400V supply system. Select the maximum disconnection time for a final subcircuit that supplies hand-held class 1 equipment.', options:['300 ms','0.4s','5s','40ms'], answer:1 },
+  { id:16, type:'mcq', standard:'AS3000', ref:'AS3000', question:'With reference to AS/NZS 3000 what is the minimum size for an aluminium aerial wiring conductor?', options:['6mm²','10mm²','16mm²','25mm²'], answer:2 },
+  { id:17, type:'mcq', standard:'AS3000', ref:'3.6.2 Exception 1', question:'Refer to AS/NZS 3000 — where is it permissible to use half the current rating of the protective device as a value for your voltage drop calculation?', options:['At the start of sub-circuits with the load distributed over the whole length of the circuit.','No sub-circuits with the load distributed over the whole length of the circuit.','All sub-circuits with the load distributed over the whole length of the circuit.','Final sub-circuits with the load distributed over the whole length of the circuit.'], answer:3 },
+  { id:18, type:'fill', standard:'AS3000', ref:'3.9.7.4 Exception 2', question:'At what length (to 2 decimal places) would a flexible cord be deemed installation wiring?', answer:'2.5m', hint:'State the length in metres' },
+  { id:19, type:'mcq', standard:'AS3000', ref:'2.5.3, 2.4.2', question:'With reference to AS/NZS 3000, what device shall NOT be used for automatic disconnection of supply?', options:['Enclosed fuse link','Moulded case circuit breakers','Semi-enclosed rewireable fuses','Miniature overcurrent circuit breakers'], answer:2 },
+  { id:20, type:'mcq', standard:'AS3000', ref:'2.6.2.4 (b)', question:'Refer to AS/NZS 3000 and state the maximum number of sub-circuits permitted to be protected by an RCD in a residential installation.', options:['1','2','3','4'], answer:2 },
+  { id:21, type:'mcq', standard:'AS3000', ref:'2.10.10.5 (b)(v)', question:'According to AS/NZS 3000 what is the minimum distance of unimpeded space around switchboards?', options:['0.75m with doors in any position','0.6m with doors in any position','0.6m with doors closed','0.75m with doors open'], answer:1 },
+  { id:22, type:'mcq', standard:'AS3000', ref:'4.15.3.1', question:'A 400V capacitor has been disconnected from the supply for 60 seconds. What is the maximum permissible voltage at the capacitor terminals?', options:['50V','100V','200V','40V'], answer:0 },
+  { id:23, type:'mcq', standard:'AS3000', ref:'4.15.3.1', question:'According to AS/NZS 3000 should a 1µF capacitor be provided with a discharge path?', options:['Yes','No','Not specified'], answer:0 },
+  { id:24, type:'mcq', standard:'AS3000', ref:'4.13.3.1', question:'According to AS/NZS 3000 does an attended electric motor which has a rating of 1500W require an overtemperature protective device?', options:['Yes, all motors require overtemperature protective device','No, must be greater than 2250W','Only requires a HRC fuse protection','No only if it is a three phase motor'], answer:1 },
+  { id:25, type:'fill', standard:'AS3000', ref:'AS3000', question:'A single-phase, low voltage electric under-bench oven with separate hob is fixed into a kitchen unit. Refer to AS/NZS 3000:\n(a) Can you directly connect the wall oven to the electrical supply without a suitable plug and socket?\n(b) Are you required to install a functional switch within two meters for the oven?', answer:'(a) YES (b) NO', hint:'Answer yes or no for each part' },
+  { id:26, type:'mcq', standard:'AS3000', ref:'AS3000', question:'According to AS/NZS 3000 what is the maximum voltage drop allowed on extra low voltage circuits?', options:['5% of nominal value','6% of nominal value','10% of nominal value','15% of nominal value'], answer:2 },
+  { id:27, type:'mcq', standard:'AS3000', ref:'7.5.1 (b)', question:'X-ray equipment must comply with AS/NZS 3000 Section 7 HIGH VOLTAGE electrical installations. True or False?', options:['True','False'], answer:1 },
+  { id:28, type:'mcq', standard:'AS3000', ref:'7.2.1.3 (a)', question:'Refer to AS/NZS 3000, Section 7 and select which of the following is deemed to be EVACUATION EQUIPMENT:', options:['Sound systems and intercom systems for emergency purposes.','Pumps for automatic sprinkler systems, water spray or deluge systems and similar fire extinguishing systems.','Air-handling systems intended to exhaust and control the spread of fire.','Lifts.'], answer:0 },
+  { id:29, type:'calc', topic:'max_demand', standard:'AS3000', ref:'Appendix C', question:'AS/NZS 3000:2007 Appendix C — Calculate the maximum demand in amps of a single 230V domestic installation with:\n• 30 × 50W recessed luminaires\n• 25 × 8W LED lights\n• 4 × 75W fluorescent lights\n• 10 × 150W outdoor flood lighting\n• 16 × 10A double socket outlets\n• 10 × 10A single socket outlets\n• 1 × 4kW gas/electric range\n• 1 × 3kW water storage heater\n• 1 × 6kW sauna', answer:'73.2A', workings:'Group A(i) indoor lighting: (30×50 + 25×8 + 4×75) = 1800W → 1800/230 = 7.83A × 0.9 = 7A\nGroup A(ii) outdoor: 10×150 = 1500W → 1500/230 = 6.52A × 0.75 = 4.89A\nGroup B sockets: 42 outlets → 10A + (32 × 0.4A) = 22.8A → 20A\nGroup C range: 4000/230 = 17.39A × 0.5 = 8.7A\nGroup D sauna: 6000/230 = 26.09A × 0.75 = 19.57A\nGroup F water heater: 3000/230 = 13.04A\nTotal = 7 + 4.89 + 20 + 8.7 + 19.57 + 13.04 = 73.2A', hint:'Apply Appendix C demand factors to each group' },
+  { id:30, type:'mcq', standard:'ECP', ref:'ECP34', question:'State the minimum vertical distance from the ground for the last span of a 230V neutral screen service main connected to a building in an area not used by vehicular traffic.', options:['4.0m','2.7m','5.5m','3.0m'], answer:1 },
+  { id:31, type:'mcq', standard:'ECP', ref:'ECP34.3.2', question:'State the minimum safe distance that insulated conductors can be above the water level of any swimming pool.', options:['3.0m','Not allowed.','2.7m','5.0m'], answer:3 },
+  { id:32, type:'fill', standard:'ECP', ref:'ECP34.4.4.2', question:'State the information that must be on the notices when overhead cables are installed over a boat ramp.', answer:'Warning of the conductors / The conductors height and voltage / Information must be on both sides of the ramp', hint:'Three pieces of information required' },
+  { id:33, type:'fill', standard:'ECP', ref:'ECP34 Table 4', question:'State the minimum vertical distance that must be maintained between the road and the distribution line conductors when a three phase 400V distribution line crosses a road used by private vehicles.', answer:'5.5m', hint:'State the distance in metres' },
+  { id:34, type:'fill', standard:'ECP', ref:'ECP34 5.2.1', question:'State the closest distance that either a crane or hydraulic work platform can be manoeuvred near a live 11kV overhead line without written consent.', answer:'4.0m', hint:'State the distance in metres' },
+  { id:35, type:'fill', standard:'ECP', ref:'ECP34 2.2.1 (a)', question:'Prior written consent from pole ________ required for excavation or interference with any land at a greater depth than ________ within 2.2m of the pole or stay wire of an overhead electric line.', answer:'owner / 300mm', hint:'Who must give consent, and what is the depth limit?' },
+  { id:36, type:'mcq', standard:'AS3000', ref:'6.5.10 Note 5', question:'Select the minimum DEGREE of PROTECTION required for a LUMINAIRE installed in zone 2 of a swimming pool:', options:['IPX8','IPX4','IPX5','IPX6'], answer:1 },
+  { id:37, type:'multi', standard:'AS3000', ref:'6.3.3.3', question:'Select TWO protective measures to limit a VERY LOW VOLTAGE hazard to persons IMMERSED in pool water:', options:['Switches and other accessories shall not be installed in Zone 0','Location of electrical equipment at a distance from the pool with all plumbing connections being made of non-conductive materials','Wiring systems shall be installed so as to prevent entry of moisture to any connection','Each luminaire supplied at nominal voltage not exceeding 12V a.c. or 30V ripple free d.c.','Metal grids or barriers inserted in any plumbing connections between the electrical equipment and pool and connected to the equipotential bonding system.','Protection by means of placing out of reach'], answer:[1,4] },
+  { id:38, type:'mcq', standard:'AS3000', ref:'6.6.4.4.2 (b)', question:'REFRIGERATION ROOMS: lamp holders suspended on a flexible pendant must be a specified height above a floor or ground. Select the correct suspended height from AS/NZS 3000 section 6.', options:['2.25m','3m','2m','2.50m'], answer:3 },
+  { id:39, type:'mcq', standard:'AS3000', ref:'Table 5.1', question:'According to AS/NZS 3000 an installation with 35mm² copper mains requires a main earthing conductor of what size?', options:['6mm²','10mm²','16mm²','35mm²'], answer:1 },
+  { id:40, type:'mcq', standard:'AS3000', ref:'AS3000', question:'A vertical type of earth electrode must be driven to what minimum depth?', options:['0.8m (NZ)','1.0m (NZ)','1.8m (NZ)','2.8m (NZ)'], answer:2 },
+  { id:41, type:'fill', standard:'AS3000', ref:'5.4', question:'Equipotential bonding is intended to ________ of voltage differences between exposed conductive parts of electrical equipment and extraneous conductive parts.', answer:'Minimise the risk associated with the occurrence', hint:'What is the purpose of equipotential bonding?' },
+  { id:42, type:'mcq', standard:'AS3000', ref:'3.3.6.2 (m) 1.0', question:'What is the minimum value of insulation resistance allowed on sheathed heating elements?', options:['0.01MΩ (10,000Ω)','0.5MΩ','1MΩ','100MΩ'], answer:0 },
+  { id:43, type:'fill', standard:'AS3000', ref:'8.3.7.1', question:'Polarity testing is necessary to ensure that ________ arises from the incorrect connection of active, neutral, and earthing conductors.', answer:'Shock Hazard', hint:'What hazard are we preventing?' },
+  { id:44, type:'mcq', standard:'AS3000', ref:'8.3.1', question:'R
